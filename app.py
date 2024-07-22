@@ -132,7 +132,7 @@ def main():
 
     # Fetch and process the CSV file on startup if vectorstore is not in session
     if st.session_state.vectorstore is None:
-        with st.spinner("Fetching and processing CSV file..."):
+        with st.spinner("CanBuddy is gearing UP!"):
             csv_content = fetch_csv_from_lambda(LAMBDA_URL)
             if csv_content:
                 all_text = get_csv_text(csv_content)
