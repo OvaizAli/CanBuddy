@@ -162,9 +162,7 @@ def main():
         if user_question:
             handle_userinput(user_question)
     elif option == "Generate a Newspaper Article":
-        user_question = "As a professional newspaper editor, you are given content for all the Canadian based Redditt posts. Use all your best knowledge to give me an engaging newspaper article mentioning all the relevant details. Remember not to mention headings like "Title", "Subtitle" Keep it self explanatory and do not mention the subreddit names too.
-
-"
+        user_question = "As a professional newspaper editor, you are given content for all the Canadian based Redditt posts. Use all your best knowledge to give me an engaging newspaper article mentioning all the relevant details. Remember not to mention headings like 'Title', 'Subtitle' Keep it self explanatory and do not mention the subreddit names too."
         # Generate and display the article
         with st.spinner("Generating the Article..."):
             handle_userinput_NA(user_question)
