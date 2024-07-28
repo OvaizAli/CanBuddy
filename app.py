@@ -155,17 +155,24 @@ def main():
 
     # Provide options after processing
     st.header("CanBuddy's Reddit LLM :brain:")
-    option = st.selectbox("Choose an option:", ["Chat with the Assistant", "Generate a Newspaper Article"])
-    
-    if option == "Chat with the Assistant":
+    option = st.selectbox("Choose an option:", ["Chat with the Assistant", "Generate a Newspaper Article", "View Dashboard"])
+
+    if option == "Chat with the AI Assistant":
         user_question = st.text_input("Ask questions about Canada:")
         if user_question:
             handle_userinput(user_question)
-    elif option == "Generate a Newspaper Article":
+    elif option == "Generate a AI Newspaper Article":
         user_question = "As a professional newspaper editor, you are given content for all the Canadian based Redditt posts. Use all your best knowledge to give me an engaging newspaper article mentioning all the relevant details. Remember not to mention headings like 'Title', 'Subtitle' Keep it self explanatory and do not mention the subreddit names too."
         # Generate and display the article
         with st.spinner("Generating the Article..."):
             handle_userinput_NA(user_question)
+    elif option == "View CanBuddy Dashboard":
+        st.markdown(
+            """
+            <iframe width="100%" height="600" src="https://lookerstudio.google.com/embed/reporting/c23c9517-a6fa-41fe-952b-daf45592240e/page/lkM4D" frameborder="0" style="border:0" allowfullscreen></iframe>
+            """,
+            unsafe_allow_html=True
+        )
 
 if __name__ == '__main__':
     main()
