@@ -18,7 +18,7 @@ load_dotenv()
 # Set up environment variables
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 HUGGINGFACEHUB_API_TOKEN = os.getenv("HUGGINGFACEHUB_API_TOKEN")
-LAMBDA_URL = "https://ww6tb2nasltu45faaytvzx7m6u0twwxt.lambda-url.us-east-1.on.aws/"
+LAMBDA_URL = "https://pfkdocpdbmjhg6syeomqao7fci0gwyfd.lambda-url.us-east-1.on.aws/"
 
 def fetch_csv_from_lambda(url):
     """Fetch CSV content from Lambda function."""
