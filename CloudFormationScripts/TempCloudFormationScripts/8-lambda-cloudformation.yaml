@@ -1,0 +1,76 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Lambda function to fetch file contents from S3 bucket and process with Google Cloud Function
+
+Resources:
+  GetFileLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: GetFileLambdaFunction
+      Handler: index.lambda_handler
+      Runtime: python3.9
+      Timeout: 900
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          from botocore.exceptions import NoCredentialsError, PartialCredentialsError
+
+          s3_client = boto3.client('s3')
+
+          def lambda_handler(event, context):
+              bucket_name = 's3-processed-canbuddy'
+              key = 'processed/processed_data.csv'
+
+              try:
+                  # Fetch the object from S3
+                  response = s3_client.get_object(Bucket=bucket_name, Key=key)
+                  csv_content = response['Body'].read().decode('utf-8')
+                  
+                  # Return the CSV content in the response
+                  return {
+                      'statusCode': 200,
+                      'headers': {
+                          'Content-Type': 'text/csv',
+                          'Content-Disposition': f'attachment; filename={key}'
+                      },
+                      'body': csv_content
+                  }
+              except s3_client.exceptions.NoSuchKey:
+                  return {
+                      'statusCode': 404,
+                      'body': json.dumps('File not found')
+                  }
+              except (NoCredentialsError, PartialCredentialsError):
+                  return {
+                      'statusCode': 403,
+                      'body': json.dumps('Credentials not available or insufficient permissions')
+                  }
+              except Exception as e:
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps(f'Error: {str(e)}')
+                  }
+
+      Role: "arn:aws:iam::251602527416:role/LabRole"
+
+  GetFileLambdaFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      AuthType: NONE
+      TargetFunctionArn: !GetAtt GetFileLambdaFunction.Arn
+
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt GetFileLambdaFunction.Arn
+      Principal: "*"
+
+Outputs:
+  LambdaFunctionARN:
+    Description: The ARN of the GetFileLambdaFunction Lambda function
+    Value: !GetAtt GetFileLambdaFunction.Arn
+
+  LambdaFunctionUrl:
+    Description: The URL endpoint for the GetFileLambdaFunction Lambda function
+    Value: !GetAtt GetFileLambdaFunctionUrl.FunctionUrl

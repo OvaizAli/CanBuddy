@@ -1,0 +1,638 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Cloud Formation Script for CanBuddy (Term Assignment)
+
+Resources:
+  RawBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: s3-raw-canbuddy-demo
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+
+  StagingBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: s3-staging-canbuddy-demo
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+
+  ProcessedBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: s3-processed-canbuddy-demo
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+
+  StagingBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref StagingBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action:
+              - 's3:GetObject'
+              - 's3:PutObject'
+            Resource: !Sub 'arn:aws:s3:::${StagingBucket}/*'
+
+  ProcessedBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ProcessedBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action:
+              - 's3:GetObject'
+              - 's3:PutObject'
+            Resource: !Sub 'arn:aws:s3:::${ProcessedBucket}/*'
+
+  RedditCredentialsSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: RedditCredentials
+      Description: "Reddit API credentials"
+      SecretString: !Sub |
+        {
+          "REDDIT_CLIENT_ID": "",
+          "REDDIT_CLIENT_SECRET": "",
+          "REDDIT_USER_AGENT": "",
+          "REDDIT_REFRESH_TOKEN": ""
+        }
+
+  FetchLambdaCanBuddy:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: FetchLambdaCanBuddy
+      Handler: index.lambda_handler
+      Runtime: python3.9
+      Timeout: 900
+      Code:
+        ZipFile: |
+          import praw
+          import prawcore
+          import json
+          import boto3
+          import os
+          import csv
+          from io import StringIO
+
+          def lambda_handler(event, context):
+              # Initialize AWS Secrets Manager client
+              secrets_client = boto3.client('secretsmanager')
+
+              # Fetch secrets
+              secret_arn = os.environ['SECRET_ARN']
+              secret_response = secrets_client.get_secret_value(SecretId=secret_arn)
+              secrets = json.loads(secret_response['SecretString'])
+
+              # Environment variables from secrets
+              reddit_client_id = secrets['REDDIT_CLIENT_ID']
+              reddit_client_secret = secrets['REDDIT_CLIENT_SECRET']
+              reddit_user_agent = secrets['REDDIT_USER_AGENT']
+              reddit_refresh_token = secrets['REDDIT_REFRESH_TOKEN']
+              aws_region_name = os.environ['AWS_REGION_NAME']
+              s3_bucket_name = os.environ['S3_BUCKET_NAME']
+
+              # Initialize Reddit instance
+              reddit = praw.Reddit(client_id=reddit_client_id,
+                                   client_secret=reddit_client_secret,
+                                   user_agent=reddit_user_agent,
+                                   refresh_token=reddit_refresh_token)
+
+              # Initialize S3 client
+              s3_client = boto3.client('s3', region_name=aws_region_name)
+
+              subreddit_names = [
+                  "Canada",
+                  "ImmigrationCanada",
+                  "CanadaPolitics",
+                  "onguardforthee",
+                  "metacanada",
+                  "CanadaHousing2",
+                  "Canada_sub",
+                  "PersonalFinanceCanada",
+                  "CostcoCanada",
+                  "CanadaUniversities",
+                  "MortgagesCanada",
+                  "AskACanadian",
+                  "ShopCanada",
+                  "CanadaPublicServants",
+                  "CanadaJobs",
+                  "canadahousing"
+              ]
+
+              results = []
+
+              for subreddit_name in subreddit_names:
+                  try:
+                      subreddit = reddit.subreddit(subreddit_name)
+
+                      subreddit_data = []
+
+                      # Fetching posts from subreddit
+                      for submission in subreddit.new(limit=10): 
+                          reddit_data = {
+                              'subreddit': subreddit_name,
+                              'title': submission.title,
+                              'selftext': submission.selftext,
+                              'score': submission.score,
+                              'num_comments': submission.num_comments,
+                              'created_utc': submission.created_utc,
+                              'author': submission.author.name if submission.author else None,
+                              'url': submission.url,
+                              'permalink': submission.permalink,
+                              'upvote_ratio': submission.upvote_ratio,
+                              'thumbnail': submission.thumbnail,
+                              'subreddit_subscribers': submission.subreddit.subscribers,
+                              'link_flair_text': submission.link_flair_text,
+                              'is_video': submission.is_video,
+                              'domain': submission.domain,
+                              'author_fullname': submission.author_fullname,
+                              'link_flair_richtext': submission.link_flair_richtext,
+                              'pwls': submission.pwls,
+                              'gilded': submission.gilded,
+                              'thumbnail_height': submission.thumbnail_height,
+                              'thumbnail_width': submission.thumbnail_width,
+                              'total_awards_received': submission.total_awards_received,
+                              'is_original_content': submission.is_original_content,
+                              'link_flair_type': submission.link_flair_type,
+                              'allow_live_comments': submission.allow_live_comments,
+                              'is_self': submission.is_self,
+                              'ups': submission.ups,
+                              'downs': submission.downs
+                          }
+
+                          subreddit_data.append(reddit_data)
+
+                      # Convert subreddit_data to CSV format
+                      csv_buffer = StringIO()
+                      csv_writer = csv.DictWriter(csv_buffer, fieldnames=reddit_data.keys())
+                      csv_writer.writeheader()
+                      csv_writer.writerows(subreddit_data)
+                      csv_content = csv_buffer.getvalue().encode('utf-8')
+
+                      # Write CSV content to S3
+                      file_key = f"{subreddit_name}/{subreddit_name}_data.csv"
+                      s3_client.put_object(
+                          Bucket=s3_bucket_name,
+                          Key=file_key,
+                          Body=csv_content,
+                          ContentType='text/csv'
+                      )
+
+                      results.append({"subreddit": subreddit_name, "status": "success", "file_key": file_key})
+
+                  except prawcore.exceptions.Forbidden as e:
+                      results.append({"subreddit": subreddit_name, "status": "error", "message": f"Access to r/{subreddit_name} is Forbidden: {e}"})
+                  except Exception as e:
+                      results.append({"subreddit": subreddit_name, "status": "error", "message": f"Error accessing r/{subreddit_name}: {e}"})
+
+              # Check if there are any errors
+              all_successful = all(result["status"] == "success" for result in results)
+              status_code = 200 if all_successful else 500
+
+              return {
+                  'statusCode': status_code,
+                  'body': json.dumps({"results": results})
+              }
+
+      Role: "arn:aws:iam::554949863437:role/LabRole"
+      Environment:
+        Variables:
+          SECRET_ARN: !Ref RedditCredentialsSecret
+          AWS_REGION_NAME: "us-east-1"
+          S3_BUCKET_NAME: "s3-raw-canbuddy-demo"
+      Layers:
+        - "arn:aws:lambda:us-east-1:770693421928:layer:Klayers-p39-praw:22"
+
+  ProcessFilesLambdaCanBuddy:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: ProcessFilesLambdaCanBuddy
+      Handler: index.lambda_handler
+      Runtime: python3.9
+      Timeout: 900
+      Code:
+        ZipFile: |
+          import boto3
+          import pandas as pd
+          from io import BytesIO
+          import os
+
+          def lambda_handler(event, context):
+              # S3 configuration
+              source_bucket_name = os.environ['SOURCE_BUCKET_NAME']
+              destination_bucket_name = os.environ['DESTINATION_BUCKET_NAME']
+              destination_file_key = os.environ['DESTINATION_FILE_KEY']
+              
+              s3_client = boto3.client('s3')
+              
+              try:
+                  # List all objects in the source bucket
+                  objects = []
+                  response = s3_client.list_objects_v2(Bucket=source_bucket_name)
+                  
+                  for obj in response.get('Contents', []):
+                      objects.append(obj['Key'])
+                  
+                  # Read and concatenate all CSV files
+                  if objects:
+                      dataframes = []
+                      for file_key in objects:
+                          obj = s3_client.get_object(Bucket=source_bucket_name, Key=file_key)
+                          df = pd.read_csv(BytesIO(obj['Body'].read()))
+                          dataframes.append(df)
+                      
+                      # Concatenate all dataframes
+                      final_df = pd.concat(dataframes, ignore_index=True)
+                      
+                      # Convert final DataFrame to CSV
+                      csv_buffer = BytesIO()
+                      final_df.to_csv(csv_buffer, index=False)
+                      csv_buffer.seek(0)
+                      
+                      # Upload the CSV file to S3
+                      s3_client.upload_fileobj(csv_buffer, destination_bucket_name, destination_file_key)
+                      
+                      return {
+                          'statusCode': 200,
+                          'body': 'CSV files merged and uploaded as CSV successfully.'
+                      }
+                  else:
+                      return {
+                          'statusCode': 200,
+                          'body': 'No CSV files found in the source bucket.'
+                      }
+              except Exception as e:
+                  return {
+                      'statusCode': 500,
+                      'body': f"Error merging and uploading CSVfiles: {str(e)}"
+                  }
+      Role: "arn:aws:iam::554949863437:role/LabRole"
+      Environment:
+        Variables:
+          SOURCE_BUCKET_NAME: "s3-staging-canbuddy-demo"
+          DESTINATION_BUCKET_NAME: "s3-processed-canbuddy-demo"
+          DESTINATION_FILE_KEY: "processed/merged_data.csv"
+          AWS_REGION_NAME: "us-east-1"
+      Layers:
+        - "arn:aws:lambda:us-east-1:770693421928:layer:Klayers-p39-pandas:22"
+        - "arn:aws:lambda:us-east-1:770693421928:layer:Klayers-p39-numpy:17"
+
+  FetchUpdateProcessedFilesLambdaCanBuddy:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: FetchUpdateProcessedFilesLambdaCanBuddy
+      Handler: index.lambda_handler
+      Runtime: python3.9
+      Timeout: 900
+      Code:
+        ZipFile: |
+          import boto3
+          import requests
+          import json
+          from io import BytesIO
+
+          def lambda_handler(event, context):
+              # S3 configuration
+              source_bucket_name = 's3-processed-canbuddy-demo'
+              file_key = 'processed/merged_data.csv'
+              new_file_key = 'processed/processed_data.csv'
+              
+              # Initialize the S3 client
+              s3_client = boto3.client('s3')
+              
+              try:
+                  # Download the merged file from S3
+                  obj = s3_client.get_object(Bucket=source_bucket_name, Key=file_key)
+                  
+                  # Read the contents of the file
+                  file_content = obj['Body'].read()
+                  
+                  # Call the Google Cloud Function for processing
+                  gcf_url = 'https://us-central1-csci-5408-data-management.cloudfunctions.net/lambdaNLP'
+                  
+                  # Create a file-like object from the S3 file content
+                  files = {'file': ('merged_data.csv', file_content, 'text/csv')}
+                  
+                  response = requests.post(gcf_url, files=files)
+                  
+                  # Check if the request was successful
+                  if response.status_code == 200:
+                      # Save the returned file from GCF to S3
+                      processed_file = response.content
+                      
+                      # Upload the processed file back to S3
+                      s3_client.put_object(Bucket=source_bucket_name, Key=new_file_key, Body=processed_file)
+                      
+                      return {
+                          'statusCode': 200,
+                          'headers': {
+                              'Content-Type': 'application/json'
+                          },
+                          'body': json.dumps({
+                              'message': f'File processed by GCF and uploaded back to S3 successfully as {new_file_key}.'
+                          })
+                      }
+                  else:
+                      return {
+                          'statusCode': response.status_code,
+                          'headers': {
+                              'Content-Type': 'application/json'
+                          },
+                          'body': json.dumps({
+                              'error': f'Error calling GCF: {response.text}'
+                          })
+                      }
+              
+              except Exception as e:
+                  return {
+                      'statusCode': 500,
+                      'headers': {
+                          'Content-Type': 'application/json'
+                      },
+                      'body': json.dumps({
+                          'error': f'Error processing the file: {str(e)}'
+                      })
+                  }
+
+      Role: "arn:aws:iam::554949863437:role/LabRole"
+      Layers:
+        - "arn:aws:lambda:us-east-1:770693421928:layer:Klayers-p39-requests-html:23"
+
+  GetFileLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: GetFileLambdaFunction
+      Handler: index.lambda_handler
+      Runtime: python3.9
+      Timeout: 900
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          from botocore.exceptions import NoCredentialsError, PartialCredentialsError
+
+          s3_client = boto3.client('s3')
+
+          def lambda_handler(event, context):
+              bucket_name = 's3-processed-canbuddy-demo'
+              key = 'processed/processed_data.csv'
+
+              try:
+                  # Fetch the object from S3
+                  response = s3_client.get_object(Bucket=bucket_name, Key=key)
+                  csv_content = response['Body'].read().decode('utf-8')
+                  
+                  # Return the CSV content in the response
+                  return {
+                      'statusCode': 200,
+                      'headers': {
+                          'Content-Type': 'text/csv',
+                          'Content-Disposition': f'attachment; filename={key}'
+                      },
+                      'body': csv_content
+                  }
+              except s3_client.exceptions.NoSuchKey:
+                  return {
+                      'statusCode': 404,
+                      'body': json.dumps('File not found')
+                  }
+              except (NoCredentialsError, PartialCredentialsError):
+                  return {
+                      'statusCode': 403,
+                      'body': json.dumps('Credentials not available or insufficient permissions')
+                  }
+              except Exception as e:
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps(f'Error: {str(e)}')
+                  }
+      Role: "arn:aws:iam::554949863437:role/LabRole"
+  
+  GetFileLambdaFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      AuthType: NONE
+      TargetFunctionArn: !GetAtt GetFileLambdaFunction.Arn
+      Cors:
+        AllowCredentials: false
+        AllowMethods: 
+          - GET
+        AllowOrigins: 
+          - "*"
+        
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt GetFileLambdaFunction.Arn
+      Principal: "*"
+      FunctionUrlAuthType: "NONE"
+
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt FetchUpdateProcessedFilesLambdaCanBuddy.Arn
+      Principal: "*"
+      FunctionUrlAuthType: "NONE"
+
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunctionUrl
+      FunctionName: !GetAtt FetchLambdaCanBuddy.Arn
+      Principal: "*"
+      FunctionUrlAuthType: "NONE"
+
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunctionUrl
+      FunctionName: !GetAtt ProcessFilesLambdaCanBuddy.Arn
+      Principal: "*"
+      FunctionUrlAuthType: "NONE"
+  
+  GlueCanBuddyJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Command:
+        Name: glueetl
+        ScriptLocation: "s3://aws-glue-assets-canbuddy-final/Glue_CanBuddy.py"
+        PythonVersion: 3
+      DefaultArguments:
+        "--job-bookmark-option": "job-bookmark-enable"
+      ExecutionProperty:
+        MaxConcurrentRuns: 2
+      MaxRetries: 0
+      Name: Glue_CanBuddy
+      Role: "arn:aws:iam::554949863437:role/LabRole"
+
+  CanBuddyStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: CanBuddyStateMachine
+      DefinitionString: |
+        {
+          "Comment": "A description of my state machine",
+          "StartAt": "Lambda Invoke",
+          "States": {
+            "Lambda Invoke": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "OutputPath": "$.Payload",
+              "Parameters": {
+                "Payload.$": "$",
+                "FunctionName": "arn:aws:lambda:us-east-1:554949863437:function:FetchLambdaCanBuddy:$LATEST"
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException",
+                    "Lambda.TooManyRequestsException"
+                  ],
+                  "IntervalSeconds": 1,
+                  "MaxAttempts": 3,
+                  "BackoffRate": 2
+                }
+              ],
+              "Next": "Wait"
+            },
+            "Wait": {
+              "Type": "Wait",
+              "Seconds": 150,
+              "Next": "Glue StartJobRun"
+            },
+            "Glue StartJobRun": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::glue:startJobRun",
+              "Parameters": {
+                "JobName": "Glue_CanBuddy"
+              },
+              "Next": "Wait (1)"
+            },
+            "Wait (1)": {
+              "Type": "Wait",
+              "Seconds": 300,
+              "Next": "Lambda Invoke (1)"
+            },
+            "Lambda Invoke (1)": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "OutputPath": "$.Payload",
+              "Parameters": {
+                "Payload.$": "$",
+                "FunctionName": "arn:aws:lambda:us-east-1:554949863437:function:ProcessFilesLambdaCanBuddy:$LATEST"
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException",
+                    "Lambda.TooManyRequestsException"
+                  ],
+                  "IntervalSeconds": 1,
+                  "MaxAttempts": 3,
+                  "BackoffRate": 2
+                }
+              ],
+              "Next": "Wait (2)"
+            },
+            "Wait (2)": {
+              "Type": "Wait",
+              "Seconds": 60,
+              "Next": "Lambda Invoke (2)"
+            },
+            "Lambda Invoke (2)": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "OutputPath": "$.Payload",
+              "Parameters": {
+                "Payload.$": "$",
+                "FunctionName": "arn:aws:lambda:us-east-1:554949863437:function:FetchUpdateProcessedFilesLambdaCanBuddy:$LATEST"
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException",
+                    "Lambda.TooManyRequestsException"
+                  ],
+                  "IntervalSeconds": 1,
+                  "MaxAttempts": 3,
+                  "BackoffRate": 2
+                }
+              ],
+              "End": true
+            }
+          }
+        }
+      RoleArn: arn:aws:iam::554949863437:role/LabRole
+
+  ScheduledRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: "Scheduled rule to run CanBuddyStateMachine at 9 AM UTC daily"
+      ScheduleExpression: "cron(0 9 * * ? *)"  # Runs at 9 AM UTC daily
+      State: "ENABLED"
+      Targets:
+        - Arn: !GetAtt CanBuddyStateMachine.Arn
+          Id: "CanBuddyStateMachineTarget"
+          RoleArn: arn:aws:iam::554949863437:role/LabRole
+
+
+Outputs:
+  RawBucketName:
+    Description: Name of the raw S3 bucket
+    Value: !Ref RawBucket
+
+  StagingBucketName:
+    Description: Name of the staging S3 bucket
+    Value: !Ref StagingBucket
+
+  ProcessedBucketName:
+    Description: Name of the processed S3 bucket
+    Value: !Ref ProcessedBucket
+
+  LambdaFunctionARN:
+    Description: The ARN of the FetchLambdaCanBuddy Lambda function
+    Value: !GetAtt FetchLambdaCanBuddy.Arn
+  
+  LambdaFunctionARN:
+    Description: The ARN of the ProcessFilesLambdaCanBuddy Lambda function
+    Value: !GetAtt ProcessFilesLambdaCanBuddy.Arn
+
+  LambdaFunctionARN:
+    Description: The ARN of the FetchUpdateProcessedFilesLambdaCanBuddy Lambda function
+    Value: !GetAtt FetchUpdateProcessedFilesLambdaCanBuddy.Arn
+    
+  StateMachineARN:
+    Description: The ARN of the created Step Functions state machine
+    Value: !GetAtt CanBuddyStateMachine.Arn
+  
+  LambdaFunctionARN:
+    Description: The ARN of the GetFileLambdaFunction Lambda function
+    Value: !GetAtt GetFileLambdaFunction.Arn
+
+  LambdaFunctionUrl:
+    Description: The URL endpoint for the GetFileLambdaFunction Lambda function
+    Value: !GetAtt GetFileLambdaFunctionUrl.FunctionUrl

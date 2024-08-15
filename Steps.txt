@@ -1,0 +1,70 @@
+Fetch_Lambda_CanBuddy
+s3-canbuddy
+Glue_CanBuddy
+Glue_Crawler_CanBuddy
+db_glue_crawler_canbuddy
+Process_Files_Lambda_CanBuddy
+
+
+1) s3-raw-canbuddy, s3-staging-canbuddy, s3-processed-canbuddy
+
++) Subreddits
+
+Canada
+ImmigrationCanada
+CanadaPolitics
+onguardforthee
+metacanada
+CanadaHousing2
+Canada_sub
+PersonalFinanceCanada
+CostcoCanada
+CanadaUniversities
+MortgagesCanada
+AskACanadian
+ShopCanada
+CanadaPublicServants
+CanadaJobs
+canadahousing
+
+
+
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "AddPerm",
+            "Effect": "Allow",
+            "Principal": "*",
+            "Action": [
+                "s3:PutObject",
+                "s3:PutObjectAcl",
+                "s3:GetObject"
+            ],
+            "Resource": "arn:aws:s3:::images-un-annotated/*"
+        }
+    ]
+}
+
+
+
+[
+    {
+        "AllowedHeaders": [
+            "*"
+        ],
+        "AllowedMethods": [
+            "GET",
+            "HEAD",
+            "POST"
+        ],
+        "AllowedOrigins": [
+            "*"
+        ],
+        "ExposeHeaders": [],
+        "MaxAgeSeconds": 3000
+    }
+]
+
+
+As a news editor of a news paper create a news letter using the subreddits fetched based on the realtime data related to canada for what is trending on reddit, donot mention the name of subreddits, just narrate the news

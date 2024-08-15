@@ -1,0 +1,108 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Lambda function to fetch file contents from S3 bucket and process with Google Cloud Function
+
+Resources:
+  FetchUpdateProcessedFiles:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: FetchUpdateProcessedFiles
+      Handler: index.lambda_handler
+      Runtime: python3.9
+      Timeout: 900
+      Code:
+        ZipFile: |
+          import boto3
+          import requests
+          import json
+          from io import BytesIO
+
+          def lambda_handler(event, context):
+              # S3 configuration
+              source_bucket_name = 's3-processed-canbuddy'
+              file_key = 'processed/merged_data.csv'
+              new_file_key = 'processed/processed_data.csv'
+              
+              # Initialize the S3 client
+              s3_client = boto3.client('s3')
+              
+              try:
+                  # Download the merged file from S3
+                  obj = s3_client.get_object(Bucket=source_bucket_name, Key=file_key)
+                  
+                  # Read the contents of the file
+                  file_content = obj['Body'].read()
+                  
+                  # Call the Google Cloud Function for processing
+                  gcf_url = 'https://us-central1-csci-5408-data-management.cloudfunctions.net/lambdaNLP'
+                  
+                  # Create a file-like object from the S3 file content
+                  files = {'file': ('merged_data.csv', file_content, 'text/csv')}
+                  
+                  response = requests.post(gcf_url, files=files)
+                  
+                  # Check if the request was successful
+                  if response.status_code == 200:
+                      # Save the returned file from GCF to S3
+                      processed_file = response.content
+                      
+                      # Upload the processed file back to S3
+                      s3_client.put_object(Bucket=source_bucket_name, Key=new_file_key, Body=processed_file)
+                      
+                      return {
+                          'statusCode': 200,
+                          'headers': {
+                              'Content-Type': 'application/json'
+                          },
+                          'body': json.dumps({
+                              'message': f'File processed by GCF and uploaded back to S3 successfully as {new_file_key}.'
+                          })
+                      }
+                  else:
+                      return {
+                          'statusCode': response.status_code,
+                          'headers': {
+                              'Content-Type': 'application/json'
+                          },
+                          'body': json.dumps({
+                              'error': f'Error calling GCF: {response.text}'
+                          })
+                      }
+              
+              except Exception as e:
+                  return {
+                      'statusCode': 500,
+                      'headers': {
+                          'Content-Type': 'application/json'
+                      },
+                      'body': json.dumps({
+                          'error': f'Error processing the file: {str(e)}'
+                      })
+                  }
+
+      Role: "arn:aws:iam::251602527416:role/LabRole"
+      Layers:
+        - "arn:aws:lambda:us-east-1:770693421928:layer:Klayers-p39-pandas:22"
+        - "arn:aws:lambda:us-east-1:770693421928:layer:Klayers-p39-numpy:17"
+        - "arn:aws:lambda:us-east-1:770693421928:layer:Klayers-p39-requests-html:23"
+
+  FetchUpdateProcessedFilesUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      AuthType: NONE
+      TargetFunctionArn: !GetAtt FetchUpdateProcessedFiles.Arn
+
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt FetchUpdateProcessedFiles.Arn
+      Principal: "*"
+
+Outputs:
+  LambdaFunctionARN:
+    Description: The ARN of the FetchUpdateProcessedFiles Lambda function
+    Value: !GetAtt FetchUpdateProcessedFiles.Arn
+
+  LambdaFunctionUrl:
+    Description: The URL endpoint for the FetchUpdateProcessedFiles Lambda function
+    Value: !GetAtt FetchUpdateProcessedFilesUrl.FunctionUrl

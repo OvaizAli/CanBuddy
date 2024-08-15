@@ -1,0 +1,100 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Lambda function to merge CSV-like files and upload as CSV to S3.
+
+Resources:
+  ProcessFilesLambdaCanBuddy:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: ProcessFilesLambdaCanBuddy
+      Handler: index.lambda_handler
+      Runtime: python3.9
+      Timeout: 900
+      Code:
+        ZipFile: |
+          import boto3
+          import pandas as pd
+          from io import BytesIO
+          import os
+
+          def lambda_handler(event, context):
+              # S3 configuration
+              source_bucket_name = os.environ['SOURCE_BUCKET_NAME']
+              destination_bucket_name = os.environ['DESTINATION_BUCKET_NAME']
+              destination_file_key = os.environ['DESTINATION_FILE_KEY']
+              
+              s3_client = boto3.client('s3')
+              
+              try:
+                  # List all objects in the source bucket
+                  objects = []
+                  response = s3_client.list_objects_v2(Bucket=source_bucket_name)
+                  
+                  for obj in response.get('Contents', []):
+                      objects.append(obj['Key'])
+                  
+                  # Read and concatenate all CSV-like files
+                  if objects:
+                      dataframes = []
+                      for file_key in objects:
+                          obj = s3_client.get_object(Bucket=source_bucket_name, Key=file_key)
+                          df = pd.read_csv(BytesIO(obj['Body'].read()))
+                          dataframes.append(df)
+                      
+                      # Concatenate all dataframes
+                      final_df = pd.concat(dataframes, ignore_index=True)
+                      
+                      # Convert final DataFrame to CSV
+                      csv_buffer = BytesIO()
+                      final_df.to_csv(csv_buffer, index=False)
+                      csv_buffer.seek(0)
+                      
+                      # Upload the CSV file to S3
+                      s3_client.upload_fileobj(csv_buffer, destination_bucket_name, destination_file_key)
+                      
+                      return {
+                          'statusCode': 200,
+                          'body': 'CSV-like files merged and uploaded as CSV successfully.'
+                      }
+                  else:
+                      return {
+                          'statusCode': 200,
+                          'body': 'No CSV-like files found in the source bucket.'
+                      }
+              except Exception as e:
+                  return {
+                      'statusCode': 500,
+                      'body': f"Error merging and uploading CSV-like files: {str(e)}"
+                  }
+      Role: "arn:aws:iam::251602527416:role/LabRole"
+      Environment:
+        Variables:
+          SOURCE_BUCKET_NAME: "s3-staging-canbuddy"
+          DESTINATION_BUCKET_NAME: "s3-processed-canbuddy"
+          DESTINATION_FILE_KEY: "processed/merged_data.csv"
+          AWS_REGION_NAME: "us-east-1"
+      Layers:
+        - "arn:aws:lambda:us-east-1:770693421928:layer:Klayers-p39-pandas:22"
+        - "arn:aws:lambda:us-east-1:770693421928:layer:Klayers-p39-numpy:17"
+
+  ProcessFilesLambdaCanBuddyUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      AuthType: NONE
+      TargetFunctionArn: !GetAtt ProcessFilesLambdaCanBuddy.Arn
+
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunctionUrl
+      FunctionName: !GetAtt ProcessFilesLambdaCanBuddy.Arn
+      Principal: "*"
+      FunctionUrlAuthType: NONE
+
+Outputs:
+  LambdaFunctionARN:
+    Description: The ARN of the ProcessFilesLambdaCanBuddy Lambda function
+    Value: !GetAtt ProcessFilesLambdaCanBuddy.Arn
+
+  LambdaFunctionUrl:
+    Description: The URL endpoint for the ProcessFilesLambdaCanBuddy Lambda function
+    Value: !GetAtt ProcessFilesLambdaCanBuddyUrl.FunctionUrl

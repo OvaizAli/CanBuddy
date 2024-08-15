@@ -1,0 +1,18 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "AWS Glue Job Test"
+
+Resources:
+  GlueCanBuddyJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Command:
+        Name: glueetl
+        ScriptLocation: "s3://aws-glue-assets-251602527416-us-east-1/scripts/Glue_CanBuddy.py"
+        PythonVersion: 3
+      DefaultArguments:
+        "--job-bookmark-option": "job-bookmark-enable"
+      ExecutionProperty:
+        MaxConcurrentRuns: 2
+      MaxRetries: 0
+      Name: Glue_CanBuddy
+      Role: "arn:aws:iam::251602527416:role/LabRole"
