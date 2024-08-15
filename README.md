@@ -37,6 +37,11 @@ pip install -r requirements.txt
 streamlit run app.py
 
 
+### Technical Details
+- Programming Language: Python
+- Framework: Streamlit for the front-end interface
+- LLM Model Used: mistralai/Mistral-7B-Instruct-v0.3 from Hugging Face's Transformers library.
+
 ## Deployment
 
 CanBuddy is deployed as a SaaS application and uses a multi-cloud deployment model with AWS and GCP services.
