@@ -44,7 +44,7 @@ CanBuddy is deployed as a SaaS application and uses a multi-cloud deployment mod
 ## Services Used
 
 - **AWS Services**:
-  - **Compute**: AWS Lambda
+  - **Compute**: AWS Lambda, AWS Step Functions
   - **Storage**: AWS S3
   - **Network**: Amazon EventBridge
   - **General**: AWS Glue, AWS Secrets Manager
@@ -55,21 +55,7 @@ CanBuddy is deployed as a SaaS application and uses a multi-cloud deployment mod
   - **Google Cloud Storage**
   - **Looker Studio**
 
-## Contributing
-
-Contributions are welcome! Please follow these guidelines for contributing:
-
-1. Fork the repository.
-2. Create a new branch (`git checkout -b feature/YourFeature`).
-3. Commit your changes (`git commit -am 'Add new feature'`).
-4. Push to the branch (`git push origin feature/YourFeature`).
-5. Create a new Pull Request.
 
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Contact
-
-For any questions or issues, please contact [your-email@example.com](mailto:your-email@example.com).
-
